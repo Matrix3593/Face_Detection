@@ -1,0 +1,73 @@
+import cv2
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+
+# Yüz modelini yükle
+face_model = load_model('face.h5')
+
+# Görüntüyü işlemek için fonksiyon
+def preprocess_image(image):
+    normalized_image = image / 255.0  # Görüntüyü normalize etme
+    resized_image = cv2.resize(normalized_image, (120, 120))  # Görüntüyü yeniden boyutlandırma
+    return resized_image
+
+# Dikdörtgeni çizmek ve etiketi yazmak için fonksiyon
+def draw_rectangle_and_label(frame, coords, label, color):
+    (x1, y1), (x2, y2) = coords
+    # Dikdörtgeni çiz
+    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+    # Etiket dikdörtgenini çiz
+    cv2.rectangle(frame, (10, 10), (200, 60), (255, 255, 255), -1)
+    # Etiketi yaz
+    cv2.putText(frame, label, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2, cv2.LINE_AA)
+
+# Video yakalama
+cap = cv2.VideoCapture(0)  # 0, yerleşik kamerayı temsil eder. Eğer farklı bir kamera kullanıyorsanız, uygun indeksi belirtmelisiniz.
+
+# İzleme sayacı
+counter = 0
+prev_detection = False
+
+while True:
+    ret, frame = cap.read()  # Video akışından bir kare oku
+
+    if not ret:
+        break
+
+    frame = frame[50:500, 50:500, :]  # Kareyi yeniden boyutlandır
+
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    resized = tf.image.resize(rgb, (120, 120))
+    
+    # Yüz modeliyle tahmin yap
+    face_yhat = face_model.predict(np.expand_dims(resized / 255, 0))
+    
+    # Tahmin sonuçlarını al
+    face_scores = face_yhat[0]
+    face_coords = face_yhat[1]
+    
+    # Eşik değerine göre yüzleri çizim yap
+    for i in range(len(face_scores)):
+        if face_scores[i] > 0.8:
+            draw_rectangle_and_label(frame, ((int(face_coords[i][0]*450), int(face_coords[i][1]*450)), (int(face_coords[i][2]*450), int(face_coords[i][3]*450))), 'Face', (0, 255, 0))
+    
+    # Sayacı güncelleme
+    if np.any(face_scores > 0.8):
+        if not prev_detection:
+            counter += 1
+        prev_detection = True
+    else:
+        prev_detection = False
+    
+    # İsim ve sayacı yazma
+    cv2.putText(frame, f"Counter: {counter}", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2, cv2.LINE_AA)
+    
+    cv2.imshow('Video', frame)
+    
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Kaynakları serbest bırak
+cap.release()
+cv2.destroyAllWindows()
