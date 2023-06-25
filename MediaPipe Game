@@ -1,1 +1,386 @@
-Hello, in this project, a system has been created that enables hand detection to control various aspects of the game character, from movements to shooting weapons and using special abilities. Have a great gaming experience!
+#Hello, in this project, a system has been created that enables hand detection to control various aspects of the game character, from movements to shooting weapons and using special abilities. Have a great gaming experience!
+
+
+
+import cv2
+import mediapipe as mp
+import pygame
+import sys
+import random
+import time
+from pygame import mixer
+
+#Game Sound
+mixer.init()
+mixer.music.load("gamemusic.mp3")
+mixer.music.set_volume(0.01)  # Müzik ses seviyesini ayarlayabilirsiniz
+mixer.music.play(-1)  # Müziği sürekli olarak çalmak için -1 kullanın
+
+
+#spell sound
+illusion_sound = pygame.mixer.Sound("ilis.wav")  # Ses dosyasının adını ve yolunu uygun şekilde değiştirin
+illusion_sound.set_volume(5)
+matrix = pygame.mixer.Sound("matrix.wav")  # Ses dosyasının adını ve yolunu uygun şekilde değiştirin
+matrix.set_volume(5)
+
+#exp sound
+exp = pygame.mixer.Sound("explosion.wav")  # Ses dosyasının adını ve yolunu uygun şekilde değiştirin
+exp.set_volume(2)
+
+#fire sound
+fires = pygame.mixer.Sound("laser.wav")  # Ses dosyasının adını ve yolunu uygun şekilde değiştirin
+fires.set_volume(0.02)
+# Game Screen
+SCREEN_WIDTH = 800
+SCREEN_HEIGHT = 600
+
+# Player İmage
+PLAYER_WIDTH = 50
+PLAYER_HEIGHT = 50
+PLAYER_SPEED = 10
+
+#Bullet İmage
+BULLET_WIDTH = 2
+BULLET_HEIGHT = 10
+BULLET_SPEED = 20
+
+# Object İmg
+OBJECT_WIDTH = 50
+OBJECT_HEIGHT = 50
+OBJECT_SPEED = 2
+
+# Colors
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+YELLOW = (255, 255, 0)
+BLUE = (0, 0, 255)
+
+# MediaPipe hand detection
+mp_drawing = mp.solutions.drawing_utils
+mp_hands = mp.solutions.hands
+
+pygame.init()
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+clock = pygame.time.Clock()
+
+player_x = SCREEN_WIDTH // 2 - PLAYER_WIDTH // 2
+player_y = SCREEN_HEIGHT - PLAYER_HEIGHT - 10
+
+bullets = []
+objects = []
+score = 0
+count=19
+
+game_over = False
+countdown = 5
+countdown_timer = None
+
+# Skill barı boyutları
+SKILLBAR_WIDTH = 200
+SKILLBAR_HEIGHT = 20
+
+# Player PROFILI
+player_image = pygame.image.load("player.png")
+player_image = pygame.transform.scale(player_image, (PLAYER_WIDTH, PLAYER_HEIGHT))
+
+illusion_active = False
+illusion_start_time = None
+illusion_duration = 30  # İllüzyon süresi (saniye)
+
+
+
+font = pygame.font.SysFont(None, 25)
+
+def is_punch(hand_landmarks):
+    thumb_tip = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP].x
+    index_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].x
+    middle_tip = hand_landmarks.landmark[mp_hands.HandLandmark.MIDDLE_FINGER_TIP].x
+    ring_tip = hand_landmarks.landmark[mp_hands.HandLandmark.RING_FINGER_TIP].x
+    pinky_tip = hand_landmarks.landmark[mp_hands.HandLandmark.PINKY_TIP].x
+    if thumb_tip < index_tip < middle_tip < ring_tip < pinky_tip:
+        return True
+    else:
+        return False
+
+def create_object():
+    # Rastgele bir X konumu seç
+    x = random.randint(SCREEN_WIDTH // 4, SCREEN_WIDTH // 4 * 3 - OBJECT_WIDTH)
+    objects.append([x, -OBJECT_HEIGHT])  
+
+def move_bullets():
+    global bullets, objects, score , count
+    new_bullets = []
+    new_objects = []
+    for bullet in bullets:
+        bullet_x, bullet_y = bullet
+        bullet_y -= BULLET_SPEED
+        hit = False
+        hit_obj = None
+        for obj in objects:
+            x, y = obj
+            if bullet_y < y + OBJECT_HEIGHT and bullet_x + BULLET_WIDTH > x and bullet_x < x + OBJECT_WIDTH:
+                hit = True
+                hit_obj = obj
+                break
+        if not hit and bullet_y > 0:
+            new_bullets.append((bullet_x, bullet_y))
+        elif hit:
+            bullets.remove(bullet)
+            objects.remove(hit_obj)
+            score += 1  # Mermi çarpıştığında skoru artır
+           
+            exp.play()
+            if count <20:
+                count+=1 
+                exp.play()
+            else:    
+                count = min(count, 20)  
+                
+    bullets = new_bullets
+
+def fire_bullet():
+    bullet_x = player_x + PLAYER_WIDTH // 60 - BULLET_WIDTH -20
+    bullet_y = player_y
+    bullets.append((bullet_x, bullet_y))
+
+    if illusion_active:
+        illusion_bullet_x = illusion1_x + PLAYER_WIDTH //60 - BULLET_WIDTH -20
+        illusion_bullet_y = illusion1_y
+        bullets.append((illusion_bullet_x, illusion_bullet_y))
+
+        illusion_bullet_x = illusion2_x + PLAYER_WIDTH //60 - BULLET_WIDTH -20
+        illusion_bullet_y = illusion2_y
+        bullets.append((illusion_bullet_x, illusion_bullet_y))
+
+    if score >= 20: 
+        illusions(hand_landmarks)
+
+def move_objects():
+    global objects, OBJECT_SPEED, score, game_over
+    new_objects = []
+    for obj in objects:
+        x, y = obj
+        y += OBJECT_SPEED  
+        if y <= SCREEN_HEIGHT: 
+            new_objects.append([x, y])
+        else:
+            if player_y + PLAYER_HEIGHT >= y and player_x + PLAYER_WIDTH >= x and player_x <= x + OBJECT_WIDTH:
+                game_over = True
+        if score >= 5 and score % 5 == 0:
+            OBJECT_SPEED += 0.02  
+    objects = new_objects
+
+def open_new_window():
+    pygame.quit()
+    pygame.init()  # Initialize the font module
+    new_window = pygame.display.set_mode((200, 100))
+    text = font.render("Paused", True, RED)
+    new_window.blit(text, (50, 50))
+    pygame.display.update()
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_q:
+                    pygame.quit()
+                    sys.exit()
+                else:
+                    return
+                
+
+
+def illusions(hand_landmarks):
+    global count, illusion_active, illusion_start_time
+    
+    if not illusion_active:
+        right_thumb_y = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP].x
+        right_index_tip_y = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].x
+        middle_tip = hand_landmarks.landmark[mp_hands.HandLandmark.MIDDLE_FINGER_TIP].x
+        ring_tip = hand_landmarks.landmark[mp_hands.HandLandmark.RING_FINGER_TIP].x
+        pinky_tip = hand_landmarks.landmark[mp_hands.HandLandmark.PINKY_TIP].x
+        
+
+        if right_thumb_y > right_index_tip_y>middle_tip>ring_tip>pinky_tip: 
+            if count >= 20:
+                illusion_active = True
+                illusion_start_time = time.time()  
+                create_illusions(hand_landmarks)
+                illusion_sound.play()
+                matrix.play()
+                count = 0
+        else:
+            illusion_active = False
+
+    if illusion_active:
+        current_time = time.time()
+        elapsed_time = current_time - illusion_start_time
+        if elapsed_time >= illusion_duration:
+            illusion_active = False
+            
+def create_illusions(hand_landmarks):
+    global illusion1_x, illusion1_y, illusion2_x, illusion2_y, player_x, player_y, illusion_active, illusion_start_time
+    print("İllüzyon oluşturuldu!")
+    illusion1_x = player_x + 50
+    illusion1_y = player_y
+
+    illusion2_x = player_x - 50
+    illusion2_y = player_y
+
+    illusion_active = True
+    illusion_start_time = time.time()
+              
+                
+                
+def draw_player():
+    player_rect = player_image.get_rect()
+    player_rect.center = (player_x, player_y)
+    screen.blit(player_image, player_rect)
+
+    if illusion_active:
+        illusion1_rect = pygame.Rect(illusion1_x, illusion1_y, PLAYER_WIDTH, PLAYER_HEIGHT)
+        screen.blit(player_image, illusion1_rect)
+
+        illusion2_rect = pygame.Rect(illusion2_x, illusion2_y, PLAYER_WIDTH, PLAYER_HEIGHT)
+        screen.blit(player_image, illusion2_rect)
+def draw_score():
+    text = font.render("Score: " + str(score), True, RED)
+    screen.blit(text, (10, 10))
+
+def draw_skill_bar():
+    skill_percent = count / 20  
+    skill_width = int(SKILLBAR_WIDTH * skill_percent)
+    skill_rect = pygame.Rect(10, SCREEN_HEIGHT - 30, skill_width, SKILLBAR_HEIGHT)
+    
+    if skill_percent >= 1:
+        pygame.draw.rect(screen, YELLOW, (10, SCREEN_HEIGHT - 30, SKILLBAR_WIDTH, SKILLBAR_HEIGHT))
+    else:
+        pygame.draw.rect(screen, YELLOW, skill_rect)
+    
+    pygame.draw.rect(screen, BLUE, (10, SCREEN_HEIGHT - 30, SKILLBAR_WIDTH, SKILLBAR_HEIGHT), 2)
+    text = font.render("SKILL BAR", True, BLUE)
+    screen.blit(text, (10, SCREEN_HEIGHT - 55))
+    
+    if skill_percent >= 1 and count % 20 == 0:
+        text = font.render("YOU CAN USE YOUR SPELL!", True, BLUE)
+        text_rect = text.get_rect()
+        text_rect.midright = (240 + SKILLBAR_WIDTH, SCREEN_HEIGHT-20 )
+        screen.blit(text, text_rect)
+    elif count >= 20 and skill_percent >= 1:
+        text = font.render("YOU CAN USE YOUR SPELL!", True, BLUE)
+        text_rect = text.get_rect()
+        text_rect.midright = (240 + SKILLBAR_WIDTH, SCREEN_HEIGHT -20)
+        screen.blit(text, text_rect)
+
+
+def draw_countdown(countdown):
+    text = font.render(str(countdown), True, RED)
+    screen.blit(text, (SCREEN_WIDTH // 2 - 10, SCREEN_HEIGHT // 2 - 10))
+
+def draw_game_over():
+    text = font.render("Game Over", True, RED)
+    screen.blit(text, (SCREEN_WIDTH // 2 - 100, SCREEN_HEIGHT // 2 - 10))
+
+def move_player(direction):
+    global player_x, illusion1_x, illusion2_x
+    if direction == 0 and player_x - PLAYER_SPEED >= 0:
+        player_x -= PLAYER_SPEED
+        if illusion_active:
+            illusion1_x -= PLAYER_SPEED
+            illusion2_x -= PLAYER_SPEED
+    elif direction == 1 and player_x + PLAYER_SPEED + PLAYER_WIDTH <= SCREEN_WIDTH:
+        player_x += PLAYER_SPEED
+        if illusion_active:
+            illusion1_x += PLAYER_SPEED
+            illusion2_x += PLAYER_SPEED
+
+hand_landmarks = None
+cap = cv2.VideoCapture(0)
+
+with mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.5) as hands:
+    running = True
+    paused = False
+    while running:
+        _, frame = cap.read()
+
+        frame = cv2.cvtColor(cv2.flip(frame, 1), cv2.COLOR_BGR2RGB)
+
+        results = hands.process(frame)
+
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                x = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].x * SCREEN_WIDTH
+                y = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].y * SCREEN_HEIGHT
+
+                if x < player_x:
+                    move_player(0)
+                elif x > player_x + PLAYER_WIDTH:
+                    move_player(1)
+
+                  
+                if hand_landmarks is not None:
+                    mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                    if is_punch(hand_landmarks):
+                        fire_bullet()
+                        fires.play()
+                    illusions(hand_landmarks)
+                    break    
+                  
+        screen.fill((0, 255, 0))
+        white_rect = pygame.Rect(SCREEN_WIDTH // 4, 0, SCREEN_WIDTH // 2, SCREEN_HEIGHT)
+        pygame.draw.rect(screen, (255, 255, 255), white_rect)
+        draw_player()
+
+        if not game_over:
+            if not paused:
+                if countdown_timer is None:
+                    countdown_timer = pygame.time.get_ticks()
+                else:
+                    current_time = pygame.time.get_ticks()
+                    if current_time - countdown_timer >= 1000:
+                        countdown -= 1
+                        countdown_timer = current_time
+                        if countdown == 0:
+                            create_object()
+                            countdown = 5
+                            countdown_timer = None
+                    draw_score()
+                    draw_skill_bar() 
+                    move_bullets()
+                    move_objects()
+                    for bullet in bullets:
+                        pygame.draw.rect(screen, RED, (bullet[0], bullet[1], BULLET_WIDTH, BULLET_HEIGHT))
+                    for obj in objects:
+                        pygame.draw.rect(screen, BLACK, (obj[0], obj[1], OBJECT_WIDTH, OBJECT_HEIGHT))
+                if illusion_active:
+                    current_time = time.time()
+                    elapsed_time = current_time - illusion_start_time
+                    if elapsed_time >= illusion_duration:
+                        illusion_active = False       
+            else:
+                draw_countdown(countdown)
+        else:
+            draw_game_over()
+
+        pygame.display.flip()
+        clock.tick(60)
+        print(count)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    if not game_over:
+                        if score >= 20:  
+                            fire_bullet()
+                elif event.key == pygame.K_p:
+                    if not game_over:
+                        paused = not paused
+                        if paused:
+                            open_new_window()
+                            
+mixer.music.stop()
+
+pygame.quit()
+cap.release()
+cv2.destroyAllWindows()
